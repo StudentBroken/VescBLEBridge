@@ -1,9 +1,13 @@
 #include <Arduino.h>
 #include <NimBLEDevice.h>
 
-// All user-configurable values (device name, pins, UUIDs, BLE security, ...)
+// All user-configurable values (device name, pins, UUIDs, BLE security, trip logging, ...)
 // live in include/config.h.
 #include "config.h"
+#include "VescPacket.h"
+#include "TripLogger.h"
+#include "CliManager.h"
+#include "WebPortal.h"
 
 int MTU_SIZE = DEFAULT_MTU_SIZE;
 int PACKET_SIZE = MTU_SIZE - 3;
@@ -16,11 +20,12 @@ NimBLECharacteristic *pCharacteristicVescRx = nullptr;
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
 uint8_t txValue = 0;
+uint32_t lastBleWriteTime = 0;
+
+static VescPacketParser vescParser;
 
 #define LOG_TAG_BLESERVER "BleServer"
 
-/**  None of these are required as they will be handled by the library with defaults. **
- **                       Remove as you see fit for your needs                        */
 class MyServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer *pServer, NimBLEConnInfo& connInfo) override {
     ESP_LOGI(LOG_TAG_BLESERVER, "Client connected: %s", connInfo.getAddress().toString().c_str());
@@ -60,12 +65,13 @@ void dumpBuffer(std::string header, std::string buffer)
 
 class MyCallbacks : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo& connInfo) override {
+    lastBleWriteTime = millis();
     ESP_LOGD(LOG_TAG_BLESERVER, "onWrite to characteristics: %s", pCharacteristic->getUUID().toString().c_str());
     std::string rxValue = pCharacteristic->getValue();
     if (rxValue.length() > 0) {
       if (pCharacteristic->getUUID().equals(pCharacteristicVescRx->getUUID())) {
         dumpBuffer("BLE/UART => VESC: ", rxValue);
-        for (int i = 0; i < rxValue.length(); i++) {
+        for (size_t i = 0; i < rxValue.length(); i++) {
           Serial1.write(rxValue[i]);
         }
       }
@@ -77,6 +83,13 @@ void setup()
 {
   Serial.begin(115200);
   Serial1.begin(VESC_UART_BAUD, SERIAL_8N1, VESC_RX_PIN, VESC_TX_PIN);
+
+#if ENABLE_TRIP_LOGGING
+  tripLogger.begin();
+#if ENABLE_WIFI_PORTAL_ON_STARTUP
+  webPortal.start();
+#endif
+#endif
 
   // Create the BLE Device
   NimBLEDevice::init(BLE_DEVICE_NAME);
@@ -94,7 +107,7 @@ void setup()
   NimBLEDevice::setSecurityPasskey(BLE_SECURITY_PASSKEY);
   ESP_LOGI(LOG_TAG_BLESERVER, "BLE security enabled - passkey required to connect");
 #else
-  NimBLEDevice::setSecurityAuth(true, false, false); // Enable bonding only
+  NimBLEDevice::setSecurityAuth(false, false, false); // Open GATT for seamless VESC Tool connection
 #endif
 
   // Characteristic property flags. When security is enabled, reads/writes
@@ -121,28 +134,58 @@ void setup()
 
   pCharacteristicVescRx->setCallbacks(new MyCallbacks());
 
+  // Start the BLE Service
+  pService->start();
 
   // Start advertising
   NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(VESC_SERVICE_UUID);
+  pAdvertising->enableScanResponse(true);
+  pAdvertising->setName(BLE_DEVICE_NAME);
+  pAdvertising->setPreferredParams(0x06, 0x12);
 
   pAdvertising->start();
-  ESP_LOGI(LOG_TAG_BLESERVER, "waiting a client connection to notify...");
+  Serial.printf("\n[BLE] Advertising started as '%s' (MAC: %s)\n", BLE_DEVICE_NAME, NimBLEDevice::getAddress().toString().c_str());
+  Serial.println("[CLI] Type 'help' for trip logging commands (status, trips, dump, wifi, ...)\n");
 }
 
 std::string vescBuffer;
-std::string updateBuffer;
+static uint32_t lastPollTime = 0;
 
 void loop()
 {
+  // Handle CLI commands from USB Serial
+  cliManager.loop();
 
+  // Handle Web server (if active)
+  webPortal.loop();
+
+#if ENABLE_TRIP_LOGGING
+  // Maintain flash write buffering & periodic flush
+  tripLogger.loop();
+#endif
+
+  // Read data coming from VESC UART
   if (Serial1.available())
   {
-    int oneByte;
     while (Serial1.available())
     {
-      oneByte = Serial1.read();
-      vescBuffer.push_back(oneByte);
+      uint8_t oneByte = (uint8_t)Serial1.read();
+      
+      // If BLE client is connected, buffer for BLE notification
+      if (deviceConnected) {
+        vescBuffer.push_back(oneByte);
+      }
+
+#if ENABLE_TRIP_LOGGING
+      // Feed packet parser to extract telemetry
+      if (vescParser.processByte(oneByte)) {
+        VescValues vals;
+        if (vescParser.getValues(vals, MOTOR_POLE_PAIRS, GEAR_RATIO, WHEEL_DIAMETER_MM)) {
+          tripLogger.logTelemetry(vals);
+        }
+      }
+#endif
     }
 
     if (deviceConnected)
@@ -165,7 +208,24 @@ void loop()
         delay(5); // bluetooth stack will go into congestion, if too many packets are sent
       }
     }
+    else
+    {
+      vescBuffer.clear(); // Discard to avoid memory growth when BLE is not connected
+    }
   }
+
+#if ENABLE_TRIP_LOGGING
+  // Active telemetry polling:
+  // Query VESC every LOG_INTERVAL_MS if phone isn't actively transmitting
+  uint32_t now = millis();
+  if ((now - lastBleWriteTime > 250) && (now - lastPollTime >= LOG_INTERVAL_MS)) {
+    lastPollTime = now;
+    uint8_t reqBuf[8];
+    size_t reqLen = 0;
+    VescPacketParser::buildGetValuesPacket(reqBuf, reqLen);
+    Serial1.write(reqBuf, reqLen);
+  }
+#endif
 
   // disconnecting
   if (!deviceConnected && oldDeviceConnected)
@@ -178,7 +238,6 @@ void loop()
   // connecting
   if (deviceConnected && !oldDeviceConnected)
   {
-    // do stuff here on connecting
     oldDeviceConnected = deviceConnected;
   }
 }
