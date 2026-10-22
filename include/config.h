@@ -28,12 +28,12 @@
 
 // UART pins. Board-specific defaults below; override if your wiring differs.
 #if defined(ARDUINO_SEEED_XIAO_ESP32C6)
-  #define VESC_RX_PIN D10
-  #define VESC_TX_PIN D9
+#define VESC_RX_PIN D10
+#define VESC_TX_PIN D9
 #else
-  // Original ESP32-C3 pins.
-  #define VESC_RX_PIN 20
-  #define VESC_TX_PIN 21
+// Original ESP32-C3 pins.
+#define VESC_RX_PIN 20
+#define VESC_TX_PIN 21
 #endif
 
 // ---------------------------------------------------------------------------
@@ -59,9 +59,10 @@
 //  Note: the connecting app must support BLE passkey entry.
 // ---------------------------------------------------------------------------
 
-//#define ENABLE_BLE_SECURITY
+// #define ENABLE_BLE_SECURITY
 
-// The 6-digit passkey (000000 - 999999) required when ENABLE_BLE_SECURITY is set.
+// The 6-digit passkey (000000 - 999999) required when ENABLE_BLE_SECURITY is
+// set.
 #define BLE_SECURITY_PASSKEY 123456
 
 // ---------------------------------------------------------------------------
@@ -72,7 +73,8 @@
 #define ENABLE_TRIP_LOGGING true
 
 // Loop recording: Maximum number of trip files to keep on flash.
-// When a new trip is created or this limit is exceeded, older trips are automatically deleted.
+// When a new trip is created or this limit is exceeded, older trips are
+// automatically deleted.
 #define MAX_STORED_TRIPS 10
 
 // Small RAM buffer size for batched flash writes (bytes).
@@ -82,24 +84,32 @@
 // How frequently to log telemetry rows to LittleFS (in milliseconds).
 #define LOG_INTERVAL_MS 1000
 
-// How frequently to flush the file to flash to protect against sudden power loss (ms).
+// How frequently to flush the file to flash to protect against sudden power
+// loss (ms).
 #define FLUSH_INTERVAL_MS 3000
 
-// Minimum free flash space in LittleFS (bytes) before pruning the oldest trip files.
+// Minimum free flash space in LittleFS (bytes) before pruning the oldest trip
+// files.
 #define MIN_LITTLEFS_FREE_BYTES (128 * 1024)
 
 // Vehicle speed & distance estimation parameters.
-// Adjust these to match your bike or board:
-#define MOTOR_POLE_PAIRS 7        // Number of motor pole pairs (e.g. 7 for standard hub/outrunner)
-#define GEAR_RATIO 1.0f           // Motor revs per wheel rev (1.0 for direct-drive hub)
-#define WHEEL_DIAMETER_MM 200.0f  // Wheel diameter in mm (e.g. 700c bike ~670mm, 8" scooter ~200mm)
+// Setup: 6384 BLDC motor (63mm diameter outrunner, 14 poles / 7 pole pairs,
+// 120kv) friction-driving a 700c bike wheel (~680mm diameter with tire).
+#define MOTOR_POLE_PAIRS 7 // 14 poles / 2 = 7 pole pairs for 6384 motor
+#define FRICTION_ROLLER_MM                                                     \
+  63.0f // 63mm outer diameter of the 6384 motor can / roller
+#define WHEEL_DIAMETER_MM                                                      \
+  680.0f // 700c bike wheel outer diameter with tire (~680mm)
+#define GEAR_RATIO                                                             \
+  (WHEEL_DIAMETER_MM / FRICTION_ROLLER_MM) // ~10.79:1 friction drive reduction
 
 // ---------------------------------------------------------------------------
-//  Wi-Fi Log Download Portal (Optional)
+//  Wi-Fi Log Download Portal
 // ---------------------------------------------------------------------------
-// Connect to this AP from your phone or laptop and open http://192.168.4.1
-// to download or delete trip CSV files.
-// Can also be launched anytime by typing 'wifi' in the USB serial terminal.
-#define ENABLE_WIFI_PORTAL_ON_STARTUP false
-#define WIFI_AP_SSID "VescTripLogs"
-#define WIFI_AP_PASSWORD ""       // Leave empty for open access
+// Automatically broadcasts 'Habaner0' for 3 minutes upon power-on.
+// If your device connects, Wi-Fi stays on indefinitely until disconnected.
+// If no device connects within 3 minutes, Wi-Fi automatically powers off.
+#define ENABLE_WIFI_PORTAL_ON_STARTUP true
+#define WIFI_AP_SSID "Habaner0l"
+#define WIFI_AP_PASSWORD "12345678"           // WPA2 password (min 8 chars, or "" for open)
+#define WIFI_IDLE_TIMEOUT_MS (10 * 60 * 1000) // 10 minutes timeout

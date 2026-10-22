@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <DNSServer.h>
 
 class WebPortal {
 public:
@@ -12,6 +13,10 @@ public:
 
 private:
   bool m_running;
+  DNSServer *m_dnsServer;
+  uint32_t m_startTime;
+  uint32_t m_lastStationActiveTime;
+  bool m_hasHadClient;
 };
 
 extern WebPortal webPortal;

@@ -137,12 +137,13 @@ void setup()
   // Start the BLE Service
   pService->start();
 
-  // Start advertising
   NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(VESC_SERVICE_UUID);
   pAdvertising->enableScanResponse(true);
   pAdvertising->setName(BLE_DEVICE_NAME);
   pAdvertising->setPreferredParams(0x06, 0x12);
+  pAdvertising->setMinInterval(0x80); // 100ms
+  pAdvertising->setMaxInterval(0x100); // 200ms
 
   pAdvertising->start();
   Serial.printf("\n[BLE] Advertising started as '%s' (MAC: %s)\n", BLE_DEVICE_NAME, NimBLEDevice::getAddress().toString().c_str());
